@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Currency Converter — Robust & Friendly</title>
+  <meta name="description" content="Robust currency converter: tries live rates, falls back to cached or built-in rates, allows manual rate input, and gives helpful debug tips."/>
+  <style>
+    :root{
+      --bg:#071226;
+      --panel: rgba(255,255,255,0.03);
+      --muted: rgba(255,255,255,0.75);
+      --accent1:#60a5fa;
+      --accent2:#a78bfa;
+      --success:#10b981;
+      --danger:#ef4444;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; padding:28px;
+      background:
+        radial-gradient(700px 300px at 10% 10%, rgba(99,102,241,0.06), transparent 10%),
+        radial-gradient(600px 240px at 90% 90%, rgba(34,211,238,0.03), transparent 12%),
+        var(--bg);
+      color:#eaf2ff; display:flex; align-items:center; justify-content:center;
+    }
+
+    .card{ width:100%; max-width:980px; display:grid; grid-template-columns:1fr 340px; gap:20px; }
+    @media (max-width:900px){ .card{ grid-template-columns:1fr; padding:0 12px } }
+
+    .panel{
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      padding:18px; border-radius:12px; border:1px solid rgba(255,255,255,0.03);
+      box-shadow: 0 8px 30px rgba(2,6,23,0.6);
+    }
+
+    h1{ margin:0 0 6px 0; font-size:20px }
+    p.lead{ margin:0; color:var(--muted); font-size:13px }
+
+    .form{ margin-top:12px; display:flex; flex-direction:column; gap:12px }
+    .row{ display:flex; gap:10px; align-items:center }
+    .input{
+      background: rgba(255,255,255,0.03); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.02);
+      display:flex; align-items:center; gap:8px;
+    }
+    input[type="number"]{ background:transparent; border:0; outline:0; color:inherit; font-size:16px; width:100%; }
+    select{ background:transparent; border:0; outline:0; color:inherit; font-size:14px; min-width:150px }
+
+    .btn{
+      padding:10px 12px; border-radius:10px; border:0; cursor:pointer; font-weight:700;
+      color:#07202a; background:linear-gradient(90deg,var(--accent1),var(--accent2)); box-shadow:0 8px 20px rgba(10,20,40,0.45);
+    }
+    .btn.secondary{ background:transparent; color:var(--muted); border:1px solid rgba(255,255,255,0.04) }
+
+    .small{ font-size:13px; color:var(--muted) }
+
+    .result{ margin-top:8px; padding:12px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;
+      background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005)); border:1px solid rgba(255,255,255,0.02);
+      font-weight:700; font-size:16px;
+    }
+
+    .meta{ margin-top:10px; color:var(--muted); font-size:13px }
+
+    .loader{ width:18px; height:18px; border-radius:50%; border:3px solid rgba(255,255,255,0.06); border-top-color:#bfe9ff; animation:spin .9s linear infinite }
+    @keyframes spin{ to{ transform:rotate(360deg) } }
+
+    .error{ color:var(--danger); font-weight:700; font-size:13px; display:none }
+
+    .success{ color:var(--success); font-weight:700; font-size:13px; display:none }
+
+    footer{ margin-top:14px; color:var(--muted); font-size:12px; text-align:center }
+
+    pre.debug{ white-space:pre-wrap; max-height:220px; overflow:auto; background:rgba(0,0,0,0.25); padding:10px; border-radius:8px }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <main class="panel" aria-labelledby="title">
+      <h1 id="title">💱 Currency Converter — Robust</h1>
+      <p class="lead">Tries live exchange rates. If that fails, uses cached values or safe built-in rates. You can also enter a manual rate.</p>
+
+      <div class="form" aria-live="polite">
+        <div class="row">
+          <div class="input" style="flex:1">
+            <label for="amount" class="small" style="min-width:60px">Amount</label>
+            <input id="amount" type="number" min="0" step="any" value="1" aria-label="Amount">
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="input" style="padding:8px;display:flex;flex-direction:column">
+              <div class="small">From</div>
+              <select id="from"></select>
+            </div>
+
+            <button id="swap" class="btn secondary" title="Swap">🔁</button>
+
+            <div class="input" style="padding:8px;display:flex;flex-direction:column">
+              <div class="small">To</div>
+              <select id="to"></select>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="convert" class="btn">Convert</button>
+          <button id="manualRate" class="btn secondary">Enter Manual Rate</button>
+          <div id="spinner" class="loader" style="display:none" aria-hidden="true"></div>
+          <div id="status" class="small" style="min-width:120px"></div>
+        </div>
+
+        <div id="error" class="error"></div>
+        <div id="ok" class="success"></div>
+
+        <div id="resultPanel" style="display:none">
+          <div class="result">
+            <div>
+              <div class="small">Converted</div>
+              <div id="converted">—</div>
+            </div>
+            <div style="text-align:right">
+              <div class="small">Rate</div>
+              <div id="rate">—</div>
+            </div>
+          </div>
+          <div class="meta"><span id="updated">—</span></div>
+        </div>
+
+        <div class="meta" style="margin-top:8px">Tip: If you opened the file directly (file://), your browser may block network requests. Run <code>python -m http.server 8000</code> in the file folder and open <code>http://localhost:8000/</code> to avoid this.</div>
+      </div>
+    </main>
+
+    <aside class="panel">
+      <div class="small">Preview</div>
+      <div style="font-weight:700;font-size:18px;margin-top:6px" id="preview">1 USD → —</div>
+
+      <div style="margin-top:12px" class="small">Popular pairs</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px" id="popular"></div>
+
+      <div style="margin-top:12px" class="small">Debug console (helpful errors)</div>
+      <pre id="debug" class="debug">No debug messages yet.</pre>
+    </aside>
+  </div>
+
+<script>
+(() => {
+  // URLs
+  const SYMBOLS_URL = 'https://api.exchangerate.host/symbols';
+  const CONVERT_URL = (f,t,a) => `https://api.exchangerate.host/convert?from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}&amount=${encodeURIComponent(a)}`;
+  const CACHE_KEY = 'robust_conv_cache_v1';
+
+  // UI
+  const amountEl = document.getElementById('amount');
+  const fromEl = document.getElementById('from');
+  const toEl = document.getElementById('to');
+  const convertBtn = document.getElementById('convert');
+  const manualBtn = document.getElementById('manualRate');
+  const swapBtn = document.getElementById('swap');
+  const spinner = document.getElementById('spinner');
+  const status = document.getElementById('status');
+  const errorEl = document.getElementById('error');
+  const okEl = document.getElementById('ok');
+  const resultPanel = document.getElementById('resultPanel');
+  const convertedEl = document.getElementById('converted');
+  const rateEl = document.getElementById('rate');
+  const updatedEl = document.getElementById('updated');
+  const preview = document.getElementById('preview');
+  const popular = document.getElementById('popular');
+  const debug = document.getElementById('debug');
+
+  // Fallback symbols and rates (relative to USD) - used if API unreachable.
+  // NOTE: these are sample fallback values for offline/resilience only and may be outdated.
+  const FALLBACK_SYMBOLS = {
+    "USD":"United States Dollar","EUR":"Euro","GBP":"British Pound","JPY":"Japanese Yen",
+    "AUD":"Australian Dollar","CAD":"Canadian Dollar","CHF":"Swiss Franc","CNY":"Chinese Yuan",
+    "INR":"Indian Rupee","PKR":"Pakistani Rupee","SAR":"Saudi Riyal","AED":"UAE Dirham",
+    "TRY":"Turkish Lira","BRL":"Brazilian Real","ZAR":"South African Rand"
+  };
+
+  const FALLBACK_TO_USD = {
+    "USD":1,
+    "EUR":0.92,
+    "GBP":0.78,
+    "JPY":155,
+    "AUD":1.60,
+    "CAD":1.35,
+    "CHF":0.92,
+    "CNY":7.10,
+    "INR":83.50,
+    "PKR":278,
+    "SAR":3.75,
+    "AED":3.67,
+    "TRY":28.5,
+    "BRL":5.1,
+    "ZAR":18.2
+  };
+
+  function logDebug(msg){
+    const now = new Date().toLocaleTimeString();
+    debug.textContent = now + ' — ' + msg + '\n' + debug.textContent;
+    console.log('[Converter debug]', msg);
+  }
+
+  function showSpinner(on=true){ spinner.style.display = on ? 'inline-block' : 'none'; convertBtn.disabled = on; manualBtn.disabled = on; swapBtn.disabled = on; }
+  function showStatus(msg, timeout=1200){ status.textContent = msg; if(timeout) setTimeout(()=> { if(status.textContent===msg) status.textContent = ''; }, timeout); }
+  function showError(msg){ errorEl.style.display = 'block'; errorEl.textContent = msg; logDebug('ERROR: ' + msg); }
+  function clearError(){ errorEl.style.display = 'none'; errorEl.textContent = ''; }
+  function showOK(msg){ okEl.style.display = 'block'; okEl.textContent = msg; setTimeout(()=> okEl.style.display = 'none', 2000); }
+
+  function formatNumber(n, dec=6){
+    if(!isFinite(n)) return '—';
+    return Number(Number(n).toFixed(dec)).toString();
+  }
+
+  async function fetchJSON(url){
+    // small fetch wrapper with timeout
+    const controller = new AbortController();
+    const id = setTimeout(()=> controller.abort(), 8000); // 8s timeout
+    try{
+      const resp = await fetch(url, {signal: controller.signal, cache:'no-store'});
+      clearTimeout(id);
+      if(!resp.ok) throw new Error('Network response not ok: ' + resp.status);
+      return await resp.json();
+    }catch(err){
+      clearTimeout(id);
+      throw err;
+    }
+  }
+
+  async function loadSymbols(){
+    try{
+      showStatus('Loading currency list…');
+      logDebug('Fetching symbols from API');
+      const data = await fetchJSON(SYMBOLS_URL);
+      if(data && data.symbols){
+        logDebug('Loaded symbols from API');
+        return data.symbols;
+      }
+      throw new Error('Unexpected symbols response');
+    }catch(err){
+      logDebug('Symbols fetch failed: ' + (err.message || err));
+      showStatus('Offline mode');
+      return FALLBACK_SYMBOLS;
+    }
+  }
+
+  function populateSelects(symbols){
+    fromEl.innerHTML = ''; toEl.innerHTML = '';
+    const codes = Object.keys(symbols).sort();
+    codes.forEach(code => {
+      const name = symbols[code] && symbols[code].description ? symbols[code].description : symbols[code];
+      const o1 = document.createElement('option'); o1.value = code; o1.textContent = `${code} — ${name}`;
+      const o2 = o1.cloneNode(true);
+      fromEl.appendChild(o1); toEl.appendChild(o2);
+    });
+    fromEl.value = 'USD' in symbols ? 'USD' : codes[0];
+    toEl.value = 'EUR' in symbols ? 'EUR' : (codes[1] || codes[0]);
+    updatePreview();
+  }
+
+  function updatePreview(){ const amt = Number(amountEl.value) || 0; preview.textContent = `${amt} ${fromEl.value} → … ${toEl.value}`; }
+
+  function getCache(){ try{ return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); }catch(e){ return {}; } }
+  function setCache(obj){ try{ localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); }catch(e){} }
+
+  async function convert(){
+    clearError(); resultPanel.style.display = 'none';
+    const from = fromEl.value, to = toEl.value;
+    const amt = Number(amountEl.value);
+    if(!isFinite(amt) || amt < 0){ showError('Enter a valid amount'); return; }
+
+    showSpinner(true);
+    try{
+      logDebug(`Converting ${amt} ${from} → ${to} using API`);
+      const url = CONVERT_URL(from,to,amt);
+      const data = await fetchJSON(url);
+      if(!('result' in data)) throw new Error('Bad API response');
+      const rate = (data.info && data.info.rate) ? Number(data.info.rate) : (data.result / (amt || 1));
+      convertedEl.textContent = `${formatNumber(data.result,6)} ${to}`;
+      rateEl.textContent = `1 ${from} = ${formatNumber(rate,6)} ${to}`;
+      updatedEl.textContent = (data.info && data.info.timestamp) ? `Rate timestamp: ${new Date(data.info.timestamp*1000).toLocaleString()}` : '';
+      resultPanel.style.display = 'block';
+      // cache success
+      const cache = getCache();
+      cache[`${from}_${to}`] = { data, ts: Date.now() };
+      setCache(cache);
+      showOK('Converted (live)');
+      logDebug('Conversion successful (live)');
+    }catch(err){
+      logDebug('Live conversion failed: ' + (err.message || err));
+      // try cached
+      const cache = getCache(); const key = `${from}_${to}`;
+      if(cache[key] && (Date.now() - cache[key].ts) < 10*60*1000){
+        const d = cache[key].data;
+        const rate = (d.info && d.info.rate) ? Number(d.info.rate) : (d.result / (amt || 1));
+        convertedEl.textContent = `${formatNumber(d.result,6)} ${to}`;
+        rateEl.textContent = `1 ${from} = ${formatNumber(rate,6)} ${to} (cached)`;
+        updatedEl.textContent = 'Using cached rate (may be a few minutes old)';
+        resultPanel.style.display = 'block';
+        showOK('Used cached rate');
+        logDebug('Used cached conversion for ' + key);
+      } else if(FALLBACK_TO_USD[from] && FALLBACK_TO_USD[to]){
+        // compute using fallback rates relative to USD
+        const fromToUSD = FALLBACK_TO_USD[from]; const toToUSD = FALLBACK_TO_USD[to];
+        const converted = amt * (toToUSD / fromToUSD);
+        convertedEl.textContent = `${formatNumber(converted,6)} ${to}`;
+        rateEl.textContent = `1 ${from} = ${formatNumber(toToUSD / fromToUSD,6)} ${to} (fallback)`;
+        updatedEl.textContent = 'Using built-in fallback rates (may be outdated)';
+        resultPanel.style.display = 'block';
+        showOK('Used fallback rates');
+        logDebug('Used fallback rates for conversion');
+      } else {
+        showError('Conversion failed. Check your internet connection or try a different pair.');
+      }
+    }finally{
+      showSpinner(false);
+    }
+  }
+
+  // manual rate entry option
+  manualBtn.addEventListener('click', ()=>{
+    clearError();
+    const from = fromEl.value, to = toEl.value;
+    const value = prompt(`Enter how many ${to} equal 1 ${from}.\nExample: for 1 USD = 278 PKR enter 278`);
+    if(value === null) return;
+    const num = parseFloat(value);
+    if(!isFinite(num) || num <= 0){ alert('Invalid number entered'); return; }
+    const amt = Number(amountEl.value) || 0;
+    const converted = amt * num;
+    convertedEl.textContent = `${formatNumber(converted,6)} ${to}`;
+    rateEl.textContent = `1 ${from} = ${formatNumber(num,6)} ${to} (manual)`;
+    updatedEl.textContent = 'Manual rate used — saved to cache for convenience';
+    resultPanel.style.display = 'block';
+    // save manual rate in cache for this pair
+    const cache = getCache(); cache[`${from}_${to}`] = { data: { result: converted, info: { rate: num }, manual: true }, ts: Date.now() }; setCache(cache);
+    showOK('Manual rate saved (cached)');
+    logDebug(`Manual rate for ${from}_${to}: ${num}`);
+  });
+
+  // events
+  convertBtn.addEventListener('click', convert);
+  swapBtn.addEventListener('click', ()=>{ const a = fromEl.value; fromEl.value = toEl.value; toEl.value = a; updatePreview(); });
+  amountEl.addEventListener('input', updatePreview);
+  fromEl.addEventListener('change', updatePreview);
+  toEl.addEventListener('change', updatePreview);
+  window.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && document.activeElement.tagName.toLowerCase() !== 'select'){ convert(); } });
+
+  function buildPopular(symbols){
+    const pairs = [['USD','EUR'],['USD','PKR'],['GBP','USD'],['EUR','INR'],['AUD','USD']];
+    popular.innerHTML = '';
+    pairs.forEach(([f,t])=>{
+      if(!(f in symbols) || !(t in symbols)) return;
+      const btn = document.createElement('button'); btn.className = 'btn secondary'; btn.type='button';
+      btn.textContent = `${f} → ${t}`;
+      btn.addEventListener('click', async ()=>{ fromEl.value=f; toEl.value=t; updatePreview(); await convert(); });
+      popular.appendChild(btn);
+    });
+  }
+
+  // init flow
+  (async ()=>{
+    logDebug('Initializing...');
+    const symbols = await loadSymbols();
+    populateSelects(symbols);
+    buildPopular(symbols);
+    try{ await convert(); }catch(e){ logDebug('Initial convert failed: ' + (e.message || e)); }
+  })();
+
+})();
+</script>
+
+<footer>Open via HTTP server if API calls fail on <code>file://</code>. If something still errors, open developer console (F12 → Console), copy the error text, and paste it here — I'll fix it.</footer>
+</body>
+</html>
